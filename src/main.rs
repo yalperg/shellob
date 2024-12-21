@@ -18,6 +18,14 @@ impl Shell {
     fn new() -> Self {
         let mut commands = HashMap::new();
         
+        commands.insert("cd".to_string(), CommandType::Builtin(|arg| {
+            let new_dir = arg.split_whitespace().peekable().peek().map_or("/", |x| *x);
+            let root = Path::new(new_dir);
+            if let Err(e) = env::set_current_dir(&root) {
+                eprintln!("{}", e);
+            }
+        }));
+
         commands.insert("echo".to_string(), CommandType::Builtin(|arg| {
             println!("{}", arg);
         }));
@@ -35,7 +43,7 @@ impl Shell {
                 return;
             }
             match arg {
-                "echo" | "exit" | "type" => println!("{} is a shellob builtin", arg),
+                "cd" | "echo" | "exit" | "type" => println!("{} is a shellob builtin", arg),
                 cmd => {
                     if let Some(path) = Shell::find_in_path(cmd) {
                         println!("{} is {}", cmd, path);
