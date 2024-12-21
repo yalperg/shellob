@@ -2,7 +2,8 @@ use std::io::{self, Write};
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::fs::File;
 
 #[derive(Clone)]
 enum CommandType {
@@ -119,19 +120,60 @@ impl Shell {
             return;
         }
 
+        // Find redirection operator and output file
+        let mut cmd_end = tokens.len();
+        let mut output_file = None;
+
+        for i in 0..tokens.len() {
+            if tokens[i] == ">" || tokens[i] == "1>" {
+                if i + 1 < tokens.len() {
+                    cmd_end = i;
+                    output_file = Some(&tokens[i + 1]);
+                }
+                break;
+            }
+        }
+
         let command = &tokens[0];
-        let arguments = &tokens[1..];
+        let arguments = &tokens[1..cmd_end];
 
         if let Some(cmd_type) = self.commands.get(command) {
+            // Handle builtin commands
             match cmd_type {
-                CommandType::Builtin(func) => func(&arguments.join(" ")),
+                CommandType::Builtin(func) => {
+                    if let Some(file) = output_file {
+                        if let Ok(mut file) = File::create(file) {
+                            let output = arguments.join(" ");
+                            writeln!(file, "{}", output).unwrap_or_else(|e| eprintln!("Error writing to file: {}", e));
+                        }
+                    } else {
+                        func(&arguments.join(" "))
+                    }
+                }
             }
         } else if let Some(path) = Shell::find_in_path(command) {
             // Execute the external command
-            match Command::new(path).args(arguments).output() {
+            let path_clone = path.clone();
+            let mut cmd = Command::new(path);
+            cmd.args(arguments);
+
+            if let Some(file) = output_file {
+                if let Ok(file) = File::create(file) {
+                    cmd.stdout(Stdio::from(file));
+                } else {
+                    eprintln!("Error: Could not create output file");
+                    return;
+                }
+            }
+
+            match cmd.output() {
                 Ok(output) => {
-                    print!("{}", String::from_utf8_lossy(&output.stdout));
-                    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+                    if output_file.is_none() {
+                        print!("{}", String::from_utf8_lossy(&output.stdout));
+                    }
+                    let stderr = String::from_utf8_lossy(&output.stderr)
+                        .replace(&format!("{}: ", path_clone), &format!("{}: ", command));
+                    eprint!("{}", stderr);
                 }
                 Err(e) => eprintln!("Error executing command: {}", e),
             }
